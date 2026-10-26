@@ -1593,13 +1593,28 @@
     }
 
     /* ================= CONDITION MANAGEMENT ================= */
-    function applyCondition(unit, type) {
+    // Statuses (burn / poison / slow) work the same for everyone, no timers:
+    //  - CON save vs the source's DC to avoid getting the status at all
+    //  - CON save vs that same DC at the start of each of the afflicted unit's turns to shake it off
+    function rollConSave(unit, dc) {
+      const mod = unit.stats ? getMod(unit.stats.con) : 0;
+      const prof = (unit.saveProfs && unit.saveProfs.includes('con')) ? (unit.profBonus || 2) : 0;
+      const d20 = Math.floor(Math.random() * 20) + 1;
+      const total = d20 + mod + prof;
+      const text = `[${d20}]${mod >= 0 ? '+' : ''}${mod}${prof ? '+' + prof + '(Prof)' : ''}=${total} vs DC ${dc}`;
+      return { success: total >= dc, text };
+    }
+
+    function applyCondition(unit, type, dc = 10) {
       if (!unit || !type || type === 'none' || unit.hp <= 0) return;
-      const existing = unit.conditions.find(c => c.type === type);
-      if (existing) {
-        existing.turnsLeft = 2;
+      if (unit.conditions.some(c => c.type === type)) return; // already afflicted
+      const save = rollConSave(unit, dc);
+      if (save.success) {
+        showPopText(unit.x, unit.y, 'RESISTED', '#facc15');
+        log(`${unit.name} CON Save ${save.text}: resists ${type}!`);
       } else {
-        unit.conditions.push({ type, turnsLeft: 2 });
+        unit.conditions.push({ type, dc });
+        log(`${unit.name} CON Save ${save.text}: FAILED, now afflicted with ${type}!`);
       }
       renderBattle();
     }
@@ -1610,18 +1625,29 @@
         return;
       }
 
+      const pending = actor.conditions.slice();
       let step = 0;
       function nextCondition() {
-        if (step >= actor.conditions.length) {
-          actor.conditions.forEach(c => c.turnsLeft--);
-          actor.conditions = actor.conditions.filter(c => c.turnsLeft > 0);
+        if (step >= pending.length) {
           renderBattle();
           if (callback) callback();
           return;
         }
 
-        const cond = actor.conditions[step];
+        const cond = pending[step];
         step++;
+
+        // Try to shake the status off before it does anything this turn
+        const save = rollConSave(actor, cond.dc || 10);
+        if (save.success) {
+          actor.conditions = actor.conditions.filter(c => c !== cond);
+          showPopText(actor.x, actor.y, 'CLEARED', '#4ade80');
+          log(`${actor.name} CON Save ${save.text}: shakes off ${cond.type}!`);
+          renderBattle();
+          setTimeout(nextCondition, 500);
+          return;
+        }
+        log(`${actor.name} CON Save ${save.text}: still ${cond.type === 'burn' ? 'burning' : cond.type === 'poison' ? 'poisoned' : 'chilled'}.`);
 
         if (cond.type === 'burn') {
           const dmg = Math.floor(Math.random() * 4) + 1;
@@ -1771,7 +1797,7 @@
           applyCrunchyHit(t.x, t.y, actor.x, actor.y, false);
           showPopText(t.x, t.y, `-${dmg}`, '#a855f7');
           log(`${actor.name}'s ${ab.name} strikes ${t.name} automatically for ${dmg} ${ab.damageType} dmg!`);
-          if (t.hp > 0 && ab.rider && ab.rider !== 'none') applyCondition(t, ab.rider);
+          if (t.hp > 0 && ab.rider && ab.rider !== 'none') applyCondition(t, ab.rider, saveDC);
           return;
         }
 
@@ -1817,7 +1843,7 @@
           const coverText = coverBonus ? '+2(Cover)' : '';
           log(`${t.name} ${saveStat.toUpperCase()} Save: [${d20}]+${tMod}${tProf ? '+'+tProf+'(Prof)' : ''}${coverText}=${saveTotal} vs DC ${saveDC} -> ${saved ? (dmg === 0 ? 'SAVED (Negated)' : 'SAVED (Half)') : 'FAILED'}: takes ${dmg} ${ab.damageType} dmg!`);
 
-          if (t.hp > 0 && !saved && ab.rider && ab.rider !== 'none') applyCondition(t, ab.rider);
+          if (t.hp > 0 && !saved && ab.rider && ab.rider !== 'none') applyCondition(t, ab.rider, saveDC);
           return;
         }
 
@@ -1861,7 +1887,7 @@
             }
 
             if (t.hp > 0 && ab.rider && ab.rider !== 'none' && ab.rider !== 'sneak_attack') {
-              applyCondition(t, ab.rider);
+              applyCondition(t, ab.rider, saveDC);
             }
 
             applyCrunchyHit(t.x, t.y, actor.x, actor.y, isCrit);
@@ -2209,6 +2235,9 @@
         return scoreA - scoreB;
       })[0];
 
+      const isChilled = goblin.conditions && goblin.conditions.some(c => c.type === 'slow');
+      const goblinSpeed = Math.max(1, goblin.speed - (isChilled ? 2 : 0));
+
       let distToTarget = getDistance(goblin, target);
 
       // Melee Pathing
@@ -2216,7 +2245,7 @@
         if (distToTarget > 1) {
           const path = findShortestBfsPath(goblin, target);
           if (path.length > 0) {
-            const stepsToTake = Math.min(goblin.speed, path.length);
+            const stepsToTake = Math.min(goblinSpeed, path.length);
             const dest = path[stepsToTake - 1];
             const oldX = goblin.x, oldY = goblin.y;
             goblin.x = dest.x; goblin.y = dest.y;
@@ -2228,7 +2257,7 @@
       // Ranged Pathing
       else {
         if (distToTarget <= 1) {
-          const reachable = Array.from(getReachableTiles(goblin, goblin.speed).keys()).map(k => {
+          const reachable = Array.from(getReachableTiles(goblin, goblinSpeed).keys()).map(k => {
             const [x, y] = k.split(',').map(Number);
             return {x, y};
           });
@@ -2250,7 +2279,7 @@
           const path = findShortestBfsPath(goblin, target);
           if (path.length > 0) {
             let dest = { x: goblin.x, y: goblin.y };
-            for (let i = 0; i < Math.min(goblin.speed, path.length); i++) {
+            for (let i = 0; i < Math.min(goblinSpeed, path.length); i++) {
               dest = path[i];
               if (getDistance(dest, target) <= goblin.range) break;
             }
@@ -2294,7 +2323,7 @@
                 target.isDowned = true;
                 target.isStabilized = false;
               } else if (goblin.rider === 'poison') {
-                applyCondition(target, 'poison');
+                applyCondition(target, 'poison', 8 + goblin.atkBonus);
               }
 
               applyCrunchyHit(target.x, target.y, goblin.x, goblin.y, false);
