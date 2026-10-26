@@ -1420,6 +1420,7 @@
 
     function getMod(val) { return Math.floor((val - 10) / 2); }
     function isWall(x, y) { return walls.some(w => w.x === x && w.y === y); }
+    function isTileOccupied(x, y) { return [...getAllActiveHeroes(), ...getLivingEnemies()].some(u => u.x === x && u.y === y); }
     function getDistance(a, b) { return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)); }
     function getLivingHeroes() { return heroes.filter(h => h.hp > 0 && !h.isDowned); }
     function getAllActiveHeroes() { return heroes.filter(h => h.deathSaves.failures < 3); }
@@ -2119,7 +2120,7 @@
             resolveModularAction(actor, null, selectedAbility, x, y);
             return;
           }
-          if (selectedAbility.targeting === 'teleport' && getDistance(actor, {x, y}) <= selectedAbility.range && !isWall(x, y)) {
+          if (selectedAbility.targeting === 'teleport' && getDistance(actor, {x, y}) <= selectedAbility.range && !isWall(x, y) && !isTileOccupied(x, y)) {
             resolveModularAction(actor, null, selectedAbility, x, y);
             return;
           }
