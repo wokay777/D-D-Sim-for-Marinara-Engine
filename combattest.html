@@ -1436,6 +1436,9 @@
       return true;
     }
 
+    // Half cover (+2 AC / Dex saves) only applies when the obstacle is right next to the target.
+    const COVER_REACH = 1;
+
     function checkLineCover(attacker, target) {
       if (getDistance(attacker, target) <= 1) return false;
       const dx = target.x - attacker.x;
@@ -1450,7 +1453,7 @@
         if (cx === attacker.x && cy === attacker.y) continue;
         if (cx === target.x && cy === target.y) continue;
 
-        if (isWall(cx, cy)) return true;
+        if (isWall(cx, cy) && getDistance({ x: cx, y: cy }, target) <= COVER_REACH) return true;
       }
       return false;
     }
@@ -1867,7 +1870,9 @@
             const coverNote = hasHalfCover ? ' (+2 Cover)' : '';
             log(`${actor.name} hits ${t.name} with ${ab.name} (${rollInfo} vs AC ${effectiveAC}${coverNote}${disadvNote}) for ${dmg} ${ab.damageType} dmg!`, isCrit ? 'log-crit' : 'log-hit');
           } else {
-            showPopText(t.x, t.y, hasHalfCover ? 'COVER (+2)' : 'MISS', '#94a3b8');
+            // Only credit cover if the roll would have hit without it
+            const coverSavedIt = hasHalfCover && d20 !== 1 && total >= t.ac;
+            showPopText(t.x, t.y, coverSavedIt ? 'COVER (+2)' : 'MISS', '#94a3b8');
             const rollInfo = hasDisadvantage ? `[${d1},${d2} Disadv=${d20}]+${totalAttackBonus}=${total}` : `[${d20}]+${totalAttackBonus}=${total}`;
             const coverNote = hasHalfCover ? ' (+2 Cover)' : '';
             log(`${actor.name} misses ${t.name} (${rollInfo} vs AC ${effectiveAC}${coverNote}${disadvNote}).`, 'log-miss');
@@ -2296,8 +2301,10 @@
               showPopText(target.x, target.y, `-${dmg}`, '#ef4444');
               log(`${goblin.name} hits ${target.name} for ${dmg} ${goblin.dmgType} dmg!${hasCover ? ' (Cover)' : ''}${disadvNote}`, 'log-hit');
             } else {
-              showPopText(target.x, target.y, hasCover ? 'COVER (+2)' : 'MISS', '#94a3b8');
-              log(`${goblin.name} misses ${target.name}.${hasCover ? ' (Blocked by Cover)' : ''}${disadvNote}`, 'log-miss');
+              // Only credit cover if the roll would have hit without it
+              const coverSavedIt = hasCover && d20 !== 1 && (d20 + goblin.atkBonus) >= target.ac;
+              showPopText(target.x, target.y, coverSavedIt ? 'COVER (+2)' : 'MISS', '#94a3b8');
+              log(`${goblin.name} misses ${target.name}.${coverSavedIt ? ' (Blocked by Cover)' : ''}${disadvNote}`, 'log-miss');
             }
             renderBattle();
             checkBattleState();
