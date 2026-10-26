@@ -2165,7 +2165,14 @@
         showPopText(defender.x, defender.y, `-${dmg}`, '#f97316');
         if (defender.hp === 0) {
           defender.conditions = [];
-          if (defender.isHero) defender.isDowned = true;
+          if (defender.isHero) {
+            defender.isDowned = true;
+            defender.isStabilized = false;
+          } else if (!corpses.some(c => c.x === defender.x && c.y === defender.y)) {
+            corpses.push({ x: defender.x, y: defender.y, name: defender.name });
+            spawnCorpseSlam(defender.x, defender.y);
+          }
+          checkBattleState();
         }
       }
       renderBattle();
@@ -2320,6 +2327,13 @@
             }
           }
         }
+      }
+
+      // Cut down by an opportunity attack while moving: no attack, turn over
+      if (goblin.hp <= 0) {
+        renderBattle();
+        setTimeout(advanceTurn, 400);
+        return;
       }
 
       distToTarget = getDistance(goblin, target);
