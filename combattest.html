@@ -1180,6 +1180,7 @@
     let selectedHeroIndex = 0;
     let editingAbilityIndex = null;
     let corpses = []; // Persistent slain enemy bone markers
+    let battleOver = false; // set when the fight ends so turns stop cycling behind the result screen
 
     let isCameraZoomed = false;
     let cameraFocusTile = { x: 4.5, y: 4.5 };
@@ -1993,6 +1994,7 @@
       });
 
       corpses = [];
+      battleOver = false;
       round = 1;
       moveSnapshot = null;
       document.getElementById('modal').style.display = 'none';
@@ -2016,6 +2018,7 @@
     }
 
     function startTurn() {
+      if (battleOver) return;
       const actor = getCurrentActor();
       if (!actor) return;
 
@@ -2248,6 +2251,7 @@
 
     /* ================= UNIFIED SMART ENEMY AI ================= */
     function runGoblinAI() {
+      if (battleOver) return;
       const goblin = getCurrentActor();
       if (!goblin || goblin.isHero || goblin.hp <= 0) { advanceTurn(); return; }
       const targets = getLivingHeroes();
@@ -2396,13 +2400,18 @@
     }
 
     function checkBattleState() {
-      if (getAllActiveHeroes().every(h => h.deathSaves.failures >= 3)) endGame('DEFEAT');
+      if (battleOver) return;
+      const active = getAllActiveHeroes();
+      if (active.length === 0) endGame('DEFEAT');
       else if (getLivingEnemies().length === 0) endGame('VICTORY');
+      // Everyone still alive is unconscious and stable: nobody can ever act again
+      else if (active.every(h => h.isDowned && h.isStabilized)) endGame('DEFEAT', 'Party Down! (All survivors unconscious)');
     }
-    function endGame(status) {
+    function endGame(status, defeatText) {
+      battleOver = true;
       const modal = document.getElementById('modal');
       modal.style.display = 'flex';
-      document.getElementById('modal-title').innerHTML = status === 'VICTORY' ? '🏆 <span style="color:#4ade80">Victory! Area Cleared</span>' : '💀 <span style="color:#ef4444">Party Wiped!</span>';
+      document.getElementById('modal-title').innerHTML = status === 'VICTORY' ? '🏆 <span style="color:#4ade80">Victory! Area Cleared</span>' : `💀 <span style="color:#ef4444">${defeatText || 'Party Wiped!'}</span>`;
     }
     function resetEncounter() { deployPartyAndBattle(); }
 
