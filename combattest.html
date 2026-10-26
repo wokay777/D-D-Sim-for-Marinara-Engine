@@ -1593,9 +1593,10 @@
     }
 
     /* ================= CONDITION MANAGEMENT ================= */
-    // Statuses (burn / poison / slow) work the same for everyone, no timers:
-    //  - CON save vs the source's DC to avoid getting the status at all
-    //  - CON save vs that same DC at the start of each of the afflicted unit's turns to shake it off
+    // Statuses work the same for every unit:
+    //  - POISON: CON save vs the source's DC to avoid it; CON save vs that DC at the start of each
+    //    of the poisoned unit's turns to shake it off. No timer.
+    //  - BURN / CHILL: apply automatically with the damage and last 2 of the afflicted unit's turns.
     function rollConSave(unit, dc) {
       const mod = unit.stats ? getMod(unit.stats.con) : 0;
       const prof = (unit.saveProfs && unit.saveProfs.includes('con')) ? (unit.profBonus || 2) : 0;
@@ -1607,16 +1608,31 @@
 
     function applyCondition(unit, type, dc = 10) {
       if (!unit || !type || type === 'none' || unit.hp <= 0) return;
-      if (unit.conditions.some(c => c.type === type)) return; // already afflicted
-      const save = rollConSave(unit, dc);
-      if (save.success) {
-        showPopText(unit.x, unit.y, 'RESISTED', '#facc15');
-        log(`${unit.name} CON Save ${save.text}: resists ${type}!`);
+
+      if (type === 'poison') {
+        if (unit.conditions.some(c => c.type === 'poison')) return; // already poisoned
+        const save = rollConSave(unit, dc);
+        if (save.success) {
+          showPopText(unit.x, unit.y, 'RESISTED', '#facc15');
+          log(`${unit.name} CON Save ${save.text}: resists poison!`);
+        } else {
+          unit.conditions.push({ type, dc });
+          log(`${unit.name} CON Save ${save.text}: FAILED, now poisoned!`);
+        }
       } else {
-        unit.conditions.push({ type, dc });
-        log(`${unit.name} CON Save ${save.text}: FAILED, now afflicted with ${type}!`);
+        const existing = unit.conditions.find(c => c.type === type);
+        if (existing) existing.turnsLeft = 2;
+        else unit.conditions.push({ type, turnsLeft: 2 });
       }
       renderBattle();
+    }
+
+    // Timed statuses (burn / chill) count down at the END of the afflicted unit's turn,
+    // so each one affects two full turns. Poison has no timer.
+    function expireTimedConditions(unit) {
+      if (!unit || !unit.conditions || unit.conditions.length === 0) return;
+      unit.conditions.forEach(c => { if (c.turnsLeft !== undefined) c.turnsLeft--; });
+      unit.conditions = unit.conditions.filter(c => c.turnsLeft === undefined || c.turnsLeft > 0);
     }
 
     function processTurnStartConditions(actor, callback) {
@@ -1637,17 +1653,19 @@
         const cond = pending[step];
         step++;
 
-        // Try to shake the status off before it does anything this turn
-        const save = rollConSave(actor, cond.dc || 10);
-        if (save.success) {
-          actor.conditions = actor.conditions.filter(c => c !== cond);
-          showPopText(actor.x, actor.y, 'CLEARED', '#4ade80');
-          log(`${actor.name} CON Save ${save.text}: shakes off ${cond.type}!`);
-          renderBattle();
-          setTimeout(nextCondition, 500);
-          return;
+        // Poison: try to shake it off before it does anything this turn
+        if (cond.type === 'poison') {
+          const save = rollConSave(actor, cond.dc || 10);
+          if (save.success) {
+            actor.conditions = actor.conditions.filter(c => c !== cond);
+            showPopText(actor.x, actor.y, 'CLEARED', '#4ade80');
+            log(`${actor.name} CON Save ${save.text}: shakes off the poison!`);
+            renderBattle();
+            setTimeout(nextCondition, 500);
+            return;
+          }
+          log(`${actor.name} CON Save ${save.text}: still poisoned.`);
         }
-        log(`${actor.name} CON Save ${save.text}: still ${cond.type === 'burn' ? 'burning' : cond.type === 'poison' ? 'poisoned' : 'chilled'}.`);
 
         if (cond.type === 'burn') {
           const dmg = Math.floor(Math.random() * 4) + 1;
@@ -2051,6 +2069,7 @@
 
     function advanceTurn() {
       moveSnapshot = null;
+      expireTimedConditions(getCurrentActor());
       turnIndex++;
       if (turnIndex >= initiativeQueue.length) { 
         turnIndex = 0; 
