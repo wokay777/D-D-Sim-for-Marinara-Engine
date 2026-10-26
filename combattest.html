@@ -2041,8 +2041,9 @@
           // Otherwise roll death save
           rollDeathSave(actor);
           setTimeout(() => {
-            if (actor.isDowned) advanceTurn();
-            else renderBattle();
+            // Nat 20: the hero wakes up and gets a full turn. Still down, stabilized or dead: turn is over.
+            if (!actor.isDowned && actor.deathSaves.failures < 3) beginHeroTurn(actor);
+            else advanceTurn();
           }, 1000);
           return;
         }
@@ -2053,18 +2054,22 @@
         }
 
         if (actor.isHero) {
-          actor.isDisengaged = false;
-          const isChilled = actor.conditions.some(c => c.type === 'slow');
-          actor.movesLeft = Math.max(1, actor.speed - (isChilled ? 2 : 0));
-          actor.hasAction = true;
-          actor.hasBonusAction = true;
-          selectedAbility = actor.abilities[0];
-          renderBattle();
+          beginHeroTurn(actor);
         } else {
           renderBattle();
           setTimeout(runGoblinAI, 650);
         }
       });
+    }
+
+    function beginHeroTurn(actor) {
+      actor.isDisengaged = false;
+      const isChilled = actor.conditions.some(c => c.type === 'slow');
+      actor.movesLeft = Math.max(1, actor.speed - (isChilled ? 2 : 0));
+      actor.hasAction = true;
+      actor.hasBonusAction = true;
+      selectedAbility = actor.abilities[0];
+      renderBattle();
     }
 
     function advanceTurn() {
